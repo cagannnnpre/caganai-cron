@@ -1,8 +1,12 @@
 name: CaganAI Cron
+
 on:
   schedule:
     - cron: '*/5 * * * *'
   workflow_dispatch:
+  repository_dispatch:
+    types: [cron-trigger]
+
 jobs:
   run:
     runs-on: ubuntu-latest
