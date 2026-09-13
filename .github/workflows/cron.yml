@@ -7,9 +7,70 @@ jobs:
   run:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - run: npm install puppeteer
-      - run: node cron.js
+
+      - name: Install Puppeteer
+        run: npm install puppeteer
+
+      - name: Run Cron Script
+        run: |
+          cat > run.js << 'SCRIPT_END'
+          const puppeteer = require('puppeteer');
+
+          (async () => {
+            const browser = await puppeteer.launch({
+              headless: 'new',
+              args: ['--no-sandbox', '--disable-setuid-sandbox']
+            });
+            const page = await browser.newPage();
+            await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36');
+
+            console.log('1. cron.php cagriliyor...');
+            await page.goto('https://cagankirilimpromax.gt.tc/cron.php?key=CagaCron2026Gizli', { waitUntil: 'networkidle0', timeout: 60000 });
+            await new Promise(r => setTimeout(r, 3000));
+
+            console.log('2. Telegram kuyrugu okunuyor...');
+            await page.goto('https://cagankirilimpromax.gt.tc/index.php?action=tg_get_queue', { waitUntil: 'networkidle0', timeout: 30000 });
+            const queueRaw = await page.evaluate(() => document.body.innerText);
+            let queue;
+            try { queue = JSON.parse(queueRaw); } catch(e) { queue = { success: false }; }
+            console.log('Kuyruk:', JSON.stringify(queue).substring(0, 200));
+
+            if (queue.success && queue.items && queue.items.length > 0) {
+              for (const item of queue.items) {
+                console.log('Gonderiliyor: id=' + item.id);
+                try {
+                  const res = await fetch('https://api.telegram.org/bot' + item.tg_token + '/sendMessage', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      chat_id: item.chat_id,
+                      text: item.message,
+                      parse_mode: 'HTML',
+                      disable_web_page_preview: true
+                    })
+                  });
+                  const json = await res.json();
+                  if (json.ok) {
+                    await page.goto('https://cagankirilimpromax.gt.tc/index.php?action=tg_mark_sent&id=' + item.id, { waitUntil: 'domcontentloaded', timeout: 15000 });
+                    console.log('OK id=' + item.id + ' gonderildi');
+                  } else {
+                    console.log('HATA id=' + item.id + ' - ' + json.description);
+                  }
+                } catch (e) {
+                  console.log('HATA id=' + item.id + ' - ' + e.message);
+                }
+              }
+            } else {
+              console.log('Kuyruk bos.');
+            }
+
+            await browser.close();
+            console.log('Bitti.');
+          })();
+          SCRIPT_END
+
+          node run.js
